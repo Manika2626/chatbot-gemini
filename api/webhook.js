@@ -63,9 +63,13 @@ export default async function handler(req, res) {
       const data = doc.data();
       const type = (data.type || "").toLowerCase();
       const title = (data.title || "").toLowerCase();
+      const authorName = (data.authorName || "").toLowerCase();
+      const description = (data.description || "").toLowerCase();
+
+      const searchableText = `${type} ${title} ${authorName} ${description}`;
 
       if (
-        keywords.some((kw) => type.includes(kw) || title.includes(kw))
+        keywords.some((kw) => searchableText.includes(kw))
       ) {
         matchedDoc = data;
       }
@@ -75,7 +79,7 @@ export default async function handler(req, res) {
       const matchedTimestamp = new Date(matchedDoc.timestamp).toLocaleString();
 
       const docPrompt = `
-You are a helpful assistant who writes clear, friendly, and engaging announcement messages for students.
+You are a helpful assistant who writes clear, friendly, and engaging announcement messages for students, dont include any sign or any format , just write properly.
 
 Here is the announcement data from the system:
 {
@@ -86,7 +90,7 @@ Here is the announcement data from the system:
   "fileURL": "${matchedDoc.fileURL}"
 }
 
-Write a short and natural announcement message based on the above data. Include the date and an image link at the end. Keep it under 150 words.
+Write a short and natural announcement message based on the above data. Include the date and an image link at the end. Keep it under 100 words , include in the msg that your data was not matched in firestore , this is general announcenment.
 `;
 
       const result = await model.generateContent(docPrompt);
@@ -97,7 +101,7 @@ Write a short and natural announcement message based on the above data. Include 
 
     // fallback: Gemini
     const fallbackPrompt = `
-Answer the following query in under 100 words, clear and concise also include one line that sorry ur query does not match any announcements, here is what i found on net:
+Answer the following query in under 100 words, clear and concise:
 "${queryText}"
 `;
 

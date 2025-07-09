@@ -66,7 +66,7 @@ export default async function handler(req, res) {
       const authorName = (data.authorName || "").toLowerCase();
       const description = (data.description || "").toLowerCase();
 
-      const searchableText = `${type} ${title} ${authorName} ${description}`;
+      const searchableText = `${type} ${title} ${authorName} `;
 
       if (
         keywords.some((kw) => searchableText.includes(kw))

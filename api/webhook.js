@@ -65,7 +65,6 @@ export default async function handler(req, res) {
         ${(data.type || "").toLowerCase()}
         ${(data.title || "").toLowerCase()}
         ${(data.authorName || "").toLowerCase()}
-        ${(data.description || "").toLowerCase()}
       `;
 
       let score = 0;
@@ -87,11 +86,11 @@ export default async function handler(req, res) {
       // Ask Gemini to nicely phrase the matched announcement
       const prompt = `
         Please summarize the following announcement in a friendly, clear way under 80 words.
-        Include the title, author, description, date, and image link at the end.
+        Include the title, author, date, and image link at the end.
         Announcement:
         Title: ${bestMatch.title}
         Author: ${bestMatch.authorName}
-        Description: ${bestMatch.description}
+        Description: ${bestMatch.description || ""}
         Date: ${new Date(bestMatch.timestamp).toLocaleString()}
         Image URL: ${bestMatch.fileURL}
       `;

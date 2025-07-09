@@ -26,14 +26,17 @@ module.exports = async (req, res) => {
   const queryText = body?.queryResult?.queryText?.toLowerCase().trim() || "";
 
   try {
-    // 🔷 First, check Firestore for matching topic
+    // 🔷 First, try to find a matching document where title matches query
     const snapshot = await db.collection("announcements")
-      .where("topic", "==", queryText)
+      .where("title", "==", queryText)
       .get();
 
     if (!snapshot.empty) {
       const doc = snapshot.docs[0].data();
-      return res.json({ fulfillmentText: doc.message });
+
+      const message = `📢 *${doc.title}* by ${doc.authorName}\n\n${doc.description}\n\n📅 Date: ${new Date(doc.timestamp).toLocaleString()}\n\n🔗 [View Image](${doc.fileURL})`;
+
+      return res.json({ fulfillmentText: message });
     }
 
     // 🔷 If not found, fallback to Gemini

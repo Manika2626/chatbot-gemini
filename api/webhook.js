@@ -1,49 +1,77 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 const admin = require("firebase-admin");
+const { Buffer } = require("buffer");
 
-// decode your base64 service account key from env
-const serviceAccount = JSON.parse(
-  Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, "base64").toString("utf-8")
-);
-
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
+if (!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+  throw new Error("FIREBASE_SERVICE_ACCOUNT_BASE64 is not set in env");
 }
 
+const serviceAccountJSON = Buffer.from(
+  process.env.FIREBASE_SERVICE_ACCOUNT_BASE64,
+  "base64"
+).toString("utf8");
+
+const serviceAccount = JSON.parse(serviceAccountJSON);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
 const db = admin.firestore();
+
+// Initialize Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-module.exports = async (req, res) => {
-  if (req.method !== "POST") {
-    return res.status(405).json({ fulfillmentText: "Method not allowed" });
-  }
-
-  const queryText = req.body?.queryResult?.queryText?.toLowerCase().trim() || "";
-
+app.post("/api/webhook", async (req, res) => {
   try {
-    // 🔷 Search Firestore: announcements where `type` matches the query OR `title` matches the query
-    const snapshot = await db.collection("announcements")
-      .where("type", "==", queryText)
-      .get();
+    const queryText = (req.body.queryResult?.queryText || "").toLowerCase();
 
-    if (!snapshot.empty) {
-      const doc = snapshot.docs[0].data();
+    if (!queryText) {
+      return res.json({ fulfillmentText: "Sorry, I didn't get your question. Please try again." });
+    }
 
-      const message = `📢 *${doc.title}* by ${doc.authorName}\n\n${doc.description}\n\n📅 Date: ${new Date(doc.timestamp).toLocaleString()}\n\n🔗 [View Image](${doc.fileURL})`;
+    // Prepare keywords for matching
+    const keywords = queryText.split(/[ ,]+/).map(w => w.trim()).filter(Boolean);
+
+    // Fetch all announcements
+    const snapshot = await db.collection("announcements").get();
+
+    let matchedDoc = null;
+
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const type = (data.type || "").toLowerCase();
+      const title = (data.title || "").toLowerCase();
+
+      if (
+        keywords.some(kw => type.includes(kw) || title.includes(kw))
+      ) {
+        matchedDoc = data;
+      }
+    });
+
+    if (matchedDoc) {
+      const message = `📢 *${matchedDoc.title}* by ${matchedDoc.authorName}\n\n${matchedDoc.description}\n\n📅 Date: ${new Date(matchedDoc.timestamp).toLocaleString()}\n\n🔗 [View Image](${matchedDoc.fileURL})`;
       return res.json({ fulfillmentText: message });
     }
 
-    // 🔷 fallback to Gemini if no match in Firestore
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
-    const result = await model.generateContent(queryText);
-    const response = result.response;
-    const text = response.text();
+    // If nothing matched, fallback to Gemini
+    const geminiPrompt = `
+      Answer the following query in under 100 words, clear and concise:
+      "${queryText}"
+    `;
 
-    return res.json({ fulfillmentText: text });
-  } catch (err) {
-    console.error("Error:", err);
-    return res.json({ fulfillmentText: "⚠️ Sorry, something went wrong." });
+    const result = await model.generateContent(geminiPrompt);
+    const response = result.response.text();
+
+    return res.json({ fulfillmentText: response });
+  } catch (error) {
+    console.error("Error handling webhook:", error);
+    return res.json({ fulfillmentText: "Sorry, something went wrong while processing your request." });
   }
-};
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});

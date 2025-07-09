@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") {
-    // Preflight request
+    // Preflight
     return res.status(200).end();
   }
 
@@ -50,13 +50,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // Extract keywords
     const keywords = queryText
       .split(/[ ,]+/)
       .map((w) => w.trim())
       .filter(Boolean);
 
-    // Firestore search
     const snapshot = await db.collection("announcements").get();
 
     let matchedDoc = null;
@@ -74,24 +72,44 @@ export default async function handler(req, res) {
     });
 
     if (matchedDoc) {
-      const message = `📢 *${matchedDoc.title}* by ${matchedDoc.authorName}\n\n${matchedDoc.description}\n\n📅 Date: ${new Date(matchedDoc.timestamp).toLocaleString()}\n\n🔗 [View Image](${matchedDoc.fileURL})`;
-      return res.json({ fulfillmentText: message });
+      const matchedTimestamp = new Date(matchedDoc.timestamp).toLocaleString();
+
+      const docPrompt = `
+You are a helpful assistant who writes clear, friendly, and engaging announcement messages for students.
+
+Here is the announcement data from the system:
+{
+  "title": "${matchedDoc.title}",
+  "authorName": "${matchedDoc.authorName}",
+  "description": "${matchedDoc.description}",
+  "timestamp": "${matchedTimestamp}",
+  "fileURL": "${matchedDoc.fileURL}"
+}
+
+Write a short and natural announcement message based on the above data. Include the date and an image link at the end. Keep it under 150 words.
+`;
+
+      const result = await model.generateContent(docPrompt);
+      const aiResponse = result.response.text();
+
+      return res.json({ fulfillmentText: aiResponse });
     }
 
     // fallback: Gemini
-    const geminiPrompt = `
-      Answer the following query in under 100 words, clear and concise:
-      "${queryText}"
-    `;
+    const fallbackPrompt = `
+Answer the following query in under 100 words, clear and concise also include one line that sorry ur query does not match any announcements, here is what i found on net:
+"${queryText}"
+`;
 
-    const result = await model.generateContent(geminiPrompt);
+    const result = await model.generateContent(fallbackPrompt);
     const response = result.response.text();
 
     return res.json({ fulfillmentText: response });
   } catch (err) {
     console.error("Error in webhook:", err);
     return res.json({
-      fulfillmentText: "Sorry, something went wrong while processing your request.",
+      fulfillmentText:
+        "Sorry, something went wrong while processing your request.",
     });
   }
 }

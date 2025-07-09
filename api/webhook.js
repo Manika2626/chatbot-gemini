@@ -11,7 +11,8 @@ module.exports = async (req, res) => {
   const queryText = body?.queryResult?.queryText || "";
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });  // ✅ correct
+    // 🔷 Use the latest stable Pro model
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
 
     const result = await model.generateContent(queryText);
     const response = result.response;

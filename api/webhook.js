@@ -2,7 +2,7 @@ import admin from "firebase-admin";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { Buffer } from "buffer";
 
-// Initialize Firebase only once
+// Firebase initialization (once)
 if (!admin.apps.length) {
   if (!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
     throw new Error("FIREBASE_SERVICE_ACCOUNT_BASE64 is not set");
@@ -32,7 +32,6 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") {
-    // Preflight
     return res.status(200).end();
   }
 
@@ -42,7 +41,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const queryText = (req.body.queryResult?.queryText || "").toLowerCase();
+    const queryText = (req.body.queryResult?.queryText || "").toLowerCase().trim();
 
     if (!queryText) {
       return res.json({
@@ -57,63 +56,68 @@ export default async function handler(req, res) {
 
     const snapshot = await db.collection("announcements").get();
 
-    let matchedDoc = null;
+    let bestMatch = null;
+    let bestMatchScore = 0;
 
     snapshot.forEach((doc) => {
       const data = doc.data();
-      const type = (data.type || "").toLowerCase();
-      const title = (data.title || "").toLowerCase();
-      const authorName = (data.authorName || "").toLowerCase();
-      const description = (data.description || "").toLowerCase();
+      const searchableText = `
+        ${(data.type || "").toLowerCase()}
+        ${(data.title || "").toLowerCase()}
+        ${(data.authorName || "").toLowerCase()}
+        ${(data.description || "").toLowerCase()}
+      `;
 
-      const searchableText = `${type} ${title} ${authorName} `;
+      let score = 0;
+      keywords.forEach((kw) => {
+        if (searchableText.includes(kw)) {
+          score += 1;
+        }
+      });
 
-      if (
-        keywords.some((kw) => searchableText.includes(kw))
-      ) {
-        matchedDoc = data;
+      if (score > bestMatchScore) {
+        bestMatchScore = score;
+        bestMatch = data;
       }
     });
 
-    if (matchedDoc) {
-      const matchedTimestamp = new Date(matchedDoc.timestamp).toLocaleString();
+    let fulfillmentText = "";
 
-      const docPrompt = `
-You are a helpful assistant who writes clear, friendly, and engaging announcement messages for students, dont include any sign or any format , just write properly.
+    if (bestMatch && bestMatchScore > 0) {
+      // Ask Gemini to nicely phrase the matched announcement
+      const prompt = `
+        Please summarize the following announcement in a friendly, clear way under 80 words.
+        Include the title, author, description, date, and image link at the end.
+        Announcement:
+        Title: ${bestMatch.title}
+        Author: ${bestMatch.authorName}
+        Description: ${bestMatch.description}
+        Date: ${new Date(bestMatch.timestamp).toLocaleString()}
+        Image URL: ${bestMatch.fileURL}
+      `;
 
-Here is the announcement data from the system:
-{
-  "title": "${matchedDoc.title}",
-  "authorName": "${matchedDoc.authorName}",
-  "description": "${matchedDoc.description}",
-  "timestamp": "${matchedTimestamp}",
-  "fileURL": "${matchedDoc.fileURL}"
-}
+      const result = await model.generateContent(prompt);
+      const response = result.response.text();
 
-Write a short and natural announcement message based on the above data. Include the date and an image link at the end. Keep it under 100 words , include in the msg that your data was not matched in firestore , this is general announcenment.
-`;
+      fulfillmentText = response.trim();
+    } else {
+      // No match, fallback to Gemini for a general answer
+      const fallbackPrompt = `
+        Answer the following user query in a friendly, concise way under 80 words:
+        "${queryText}"
+      `;
 
-      const result = await model.generateContent(docPrompt);
-      const aiResponse = result.response.text();
+      const result = await model.generateContent(fallbackPrompt);
+      const response = result.response.text();
 
-      return res.json({ fulfillmentText: aiResponse });
+      fulfillmentText = response.trim();
     }
 
-    // fallback: Gemini
-    const fallbackPrompt = `
-Answer the following query in under 100 words, clear and concise:
-"${queryText}"
-`;
-
-    const result = await model.generateContent(fallbackPrompt);
-    const response = result.response.text();
-
-    return res.json({ fulfillmentText: response });
+    return res.json({ fulfillmentText });
   } catch (err) {
     console.error("Error in webhook:", err);
     return res.json({
-      fulfillmentText:
-        "Sorry, something went wrong while processing your request.",
+      fulfillmentText: "Sorry, something went wrong while processing your request.",
     });
   }
 }

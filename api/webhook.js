@@ -1,8 +1,8 @@
-const admin = require("firebase-admin");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const { Buffer } = require("buffer");
+import admin from "firebase-admin";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { Buffer } from "buffer";
 
-// initialize Firebase only once
+// Initialize Firebase only once
 if (!admin.apps.length) {
   if (!process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
     throw new Error("FIREBASE_SERVICE_ACCOUNT_BASE64 is not set");
@@ -26,8 +26,18 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 export default async function handler(req, res) {
+  // CORS headers
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    // Preflight request
+    return res.status(200).end();
+  }
+
   if (req.method !== "POST") {
-    res.setHeader("Allow", ["POST"]);
+    res.setHeader("Allow", ["POST", "OPTIONS"]);
     return res.status(405).json({ message: "Method Not Allowed" });
   }
 
@@ -40,21 +50,24 @@ export default async function handler(req, res) {
       });
     }
 
-    // keywords
-    const keywords = queryText.split(/[ ,]+/).map(w => w.trim()).filter(Boolean);
+    // Extract keywords
+    const keywords = queryText
+      .split(/[ ,]+/)
+      .map((w) => w.trim())
+      .filter(Boolean);
 
     // Firestore search
     const snapshot = await db.collection("announcements").get();
 
     let matchedDoc = null;
 
-    snapshot.forEach(doc => {
+    snapshot.forEach((doc) => {
       const data = doc.data();
       const type = (data.type || "").toLowerCase();
       const title = (data.title || "").toLowerCase();
 
       if (
-        keywords.some(kw => type.includes(kw) || title.includes(kw))
+        keywords.some((kw) => type.includes(kw) || title.includes(kw))
       ) {
         matchedDoc = data;
       }
